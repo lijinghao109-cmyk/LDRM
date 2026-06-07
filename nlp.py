@@ -5,6 +5,7 @@ TF-IDF based keyword extraction.
 """
 
 import re
+import unicodedata
 import jieba
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -40,6 +41,42 @@ STOPWORDS = {
     "such", "other", "only", "same", "very", "just", "because",
 }
 
+CUSTOM_TERMS = [
+    "自然语言处理",
+    "机器学习",
+    "深度学习",
+    "知识图谱",
+    "文本分类",
+    "信息检索",
+    "文献综述",
+    "实证研究",
+    "卷积神经网络",
+    "循环神经网络",
+    "支持向量机",
+    "大语言模型",
+    "生成式人工智能",
+]
+
+for term in CUSTOM_TERMS:
+    jieba.add_word(term)
+
+
+def normalize_text(text: str) -> str:
+    """
+    Normalize text before tokenization/search:
+    - Convert compatibility characters to standard form
+    - Lowercase ASCII text
+    - Collapse repeated whitespace
+    """
+    if not text:
+        return ""
+
+    text = unicodedata.normalize("NFKC", text)
+    text = text.replace("\u3000", " ")
+    text = re.sub(r"[\u200b-\u200f\uFEFF]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip().lower()
+
 
 def preprocess_text(text: str) -> str:
     """
@@ -51,6 +88,8 @@ def preprocess_text(text: str) -> str:
     """
     if not text or not text.strip():
         return ""
+
+    text = normalize_text(text)
 
     # Remove HTML-like tags and URLs if any
     text = re.sub(r"<[^>]+>", " ", text)
@@ -149,7 +188,7 @@ def summarize_text(text: str, max_sentences: int = 3) -> str:
         return ""
 
     # Split by sentence delimiters (Chinese punctuation or newlines)
-    raw_sentences = re.split(r'[。！？\n]+', text.strip())
+    raw_sentences = re.split(r"[。！？；;\n]+", text.strip())
     sentences = [s.strip() for s in raw_sentences if s.strip()]
     if len(sentences) <= max_sentences:
         return "\n".join(sentences)
@@ -161,6 +200,9 @@ def summarize_text(text: str, max_sentences: int = 3) -> str:
         score = sum(freq_map.get(token, 0) for token in sentence_tokens)
         if len(sentence_tokens) == 0:
             score = 0
+        else:
+            # Keep long sentences from dominating the summary too much.
+            score = score / (1 + len(sentence_tokens) ** 0.5)
         scores.append((score, idx, sentence))
 
     scores.sort(key=lambda item: (-item[0], item[1]))
@@ -253,7 +295,7 @@ def extract_topics_lda(texts: list[str], num_topics: int = 3, passes: int = 10) 
             n_components=num_topics,
             random_state=42,
             max_iter=passes,
-            learning_method="online",
+            learning_method="batch",
             n_jobs=-1,
         )
         lda.fit(term_matrix)

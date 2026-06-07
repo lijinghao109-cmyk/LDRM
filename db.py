@@ -8,6 +8,8 @@ import os
 import sys
 from datetime import datetime
 
+from nlp import normalize_text
+
 APP_NAME = "LDRM"
 
 
@@ -106,22 +108,53 @@ def get_document_by_id(doc_id: int) -> dict | None:
 
 
 def search_documents(keyword: str) -> list[dict]:
-    """Search documents by keyword in title or content."""
+    """Search documents by keyword in title or content.
+
+    Uses light normalization and a simple relevance score so Chinese phrase
+    searches behave better than a raw LIKE query.
+    """
+    query = normalize_text(keyword)
+    if not query:
+        return []
+
     conn = get_connection()
     cursor = conn.cursor()
-    pattern = f"%{keyword}%"
     cursor.execute(
         """
         SELECT id, title, file_path, content, category, created_at
         FROM documents
-        WHERE title LIKE ? OR content LIKE ?
         ORDER BY id DESC
-        """,
-        (pattern, pattern),
+        """
     )
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
-    return rows
+
+    compact_query = query.replace(" ", "")
+    scored_rows: list[tuple[int, int, dict]] = []
+
+    for row in rows:
+        title = normalize_text(row.get("title", ""))
+        content = normalize_text(row.get("content", "") or "")
+        title_compact = title.replace(" ", "")
+        content_compact = content.replace(" ", "")
+
+        score = 0
+        if compact_query in title_compact:
+            score += 30
+            score += max(0, 10 - title_compact.find(compact_query))
+        if compact_query in content_compact:
+            score += 12
+
+        query_terms = [term for term in query.split(" ") if term]
+        if len(query_terms) > 1:
+            score += sum(3 for term in query_terms if term in title_compact)
+            score += sum(1 for term in query_terms if term in content_compact)
+
+        if score > 0:
+            scored_rows.append((score, row["id"], row))
+
+    scored_rows.sort(key=lambda item: (-item[0], -item[1]))
+    return [row for _, _, row in scored_rows]
 
 
 def update_document_category(doc_id: int, category: str):
