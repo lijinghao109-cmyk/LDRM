@@ -5,6 +5,7 @@ Reads .docx files, extracts plain text, and copies files into data/docs/.
 
 import os
 import shutil
+from typing import Tuple
 
 from docx import Document
 from db import DATA_DIR
@@ -12,12 +13,16 @@ from db import DATA_DIR
 DOCS_DIR = os.path.join(DATA_DIR, "docs")
 
 
-def ensure_docs_dir():
+def ensure_docs_dir() -> None:
     """Create the docs storage directory if it doesn't exist."""
-    """
-    Copy a .docx file into data/docs/.
-    If a file with the same name already exists, a counter suffix is added.
-    Returns the destination path.
+    os.makedirs(DOCS_DIR, exist_ok=True)
+
+
+def copy_to_local(src_path: str) -> str:
+    """Copy a .docx file into `data/docs/`.
+
+    If a file with the same name already exists, append a counter suffix.
+    Returns the destination (local) path.
     """
     ensure_docs_dir()
     filename = os.path.basename(src_path)
@@ -31,6 +36,7 @@ def ensure_docs_dir():
             dest_path = os.path.join(DOCS_DIR, f"{name}_{counter}{ext}")
             counter += 1
 
+    # Copy the file if it's not already the same file
     if not os.path.exists(dest_path):
         shutil.copy2(src_path, dest_path)
 
@@ -38,11 +44,7 @@ def ensure_docs_dir():
 
 
 def extract_text(docx_path: str) -> str:
-    """
-    Extract all paragraph text from a .docx file.
-    Returns the full text as a single string, paragraphs joined by newlines.
-    Returns an empty string on failure.
-    """
+    """Extract plain text from a .docx file; returns empty string on failure."""
     try:
         doc = Document(docx_path)
         paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
@@ -53,24 +55,14 @@ def extract_text(docx_path: str) -> str:
 
 
 def get_title_from_path(docx_path: str) -> str:
-    """
-    Derive a human-readable title from the file name.
-    Strips the extension and replaces underscores/hyphens with spaces.
-    """
+    """Derive a human-readable title from the file name."""
     filename = os.path.basename(docx_path)
     name, _ = os.path.splitext(filename)
     return name.replace("_", " ").replace("-", " ").strip()
 
 
-def import_docx(src_path: str) -> tuple[str, str, str]:
-    """
-    Full import pipeline for a single .docx file:
-      1. Copy to local data/docs/
-      2. Extract text content
-      3. Derive title
-
-    Returns (title, local_file_path, content).
-    """
+def import_docx(src_path: str) -> Tuple[str, str, str]:
+    """Import a single .docx file: copy locally, extract text, and return title/path/content."""
     local_path = copy_to_local(src_path)
     content = extract_text(local_path)
     title = get_title_from_path(local_path)

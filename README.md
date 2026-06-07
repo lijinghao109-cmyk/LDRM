@@ -105,6 +105,17 @@ build_windows.bat
 
 ---
 
+## ⚙️ GitHub Actions: 自动生成 Windows 可执行文件
+
+仓库包含 GitHub Actions 工作流，能在 Windows runner 上自动构建 `.exe` 并上传为构件（artifact）。
+
+- 工作流路径：`.github/workflows/build-windows.yml`
+- 触发方式：推送到 `main` 或 `master` 分支，或在 GitHub 页面手动触发 (`Actions -> Build Windows executable -> Run workflow`)。
+- 输出：构建完成后，`LDRM-windows` 构件中包含 `LDRM.exe`（可直接在 Windows 上双击运行）。
+
+注意：GitHub Actions 会在 `windows-latest` 机器上运行 PyInstaller，因此无需在本地 Windows 机器上手动打包（除非你想本地测试）。
+
+
 ## 🔧 常见问题
 
 **无法启动，提示缺少 `PyQt6`**
