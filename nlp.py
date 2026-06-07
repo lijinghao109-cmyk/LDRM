@@ -6,7 +6,10 @@ TF-IDF based keyword extraction.
 
 import re
 import jieba
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import LatentDirichletAllocation
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Stopwords
@@ -119,6 +122,52 @@ def extract_keywords(text: str, top_n: int = 10) -> list[str]:
     return keywords[:top_n]
 
 
+def get_term_frequencies(text: str, top_n: int = 15) -> list[tuple[str, int]]:
+    """
+    Return the top-N most frequent terms in the text after preprocessing.
+    Uses the same tokenization and stopword filtering as keyword extraction.
+    """
+    preprocessed = preprocess_text(text)
+    if not preprocessed.strip():
+        return []
+
+    tokens = preprocessed.split()
+    freq = {}
+    for token in tokens:
+        freq[token] = freq.get(token, 0) + 1
+
+    sorted_terms = sorted(freq.items(), key=lambda pair: (-pair[1], pair[0]))
+    return sorted_terms[:top_n]
+
+
+def summarize_text(text: str, max_sentences: int = 3) -> str:
+    """
+    Perform a simple extractive summary by scoring sentences using term frequency.
+    Returns the highest-scoring sentences in their original order.
+    """
+    if not text or not text.strip():
+        return ""
+
+    # Split by sentence delimiters (Chinese punctuation or newlines)
+    raw_sentences = re.split(r'[。！？\n]+', text.strip())
+    sentences = [s.strip() for s in raw_sentences if s.strip()]
+    if len(sentences) <= max_sentences:
+        return "\n".join(sentences)
+
+    freq_map = {term: count for term, count in get_term_frequencies(text, top_n=200)}
+    scores = []
+    for idx, sentence in enumerate(sentences):
+        sentence_tokens = preprocess_text(sentence).split()
+        score = sum(freq_map.get(token, 0) for token in sentence_tokens)
+        if len(sentence_tokens) == 0:
+            score = 0
+        scores.append((score, idx, sentence))
+
+    scores.sort(key=lambda item: (-item[0], item[1]))
+    selected = sorted(scores[:max_sentences], key=lambda item: item[1])
+    return "\n".join([item[2] for item in selected])
+
+
 def extract_keywords_from_corpus(
     texts: list[str], top_n: int = 10
 ) -> list[list[str]]:
@@ -144,3 +193,85 @@ def extract_keywords_from_corpus(
         result.append(keywords[:top_n])
 
     return result
+
+
+def calculate_doc_similarity(text1: str, text2: str) -> float:
+    """
+    Calculate cosine similarity between two documents using TF-IDF.
+    Returns a value between 0 and 1 (1 = identical, 0 = completely different).
+    """
+    if not text1.strip() or not text2.strip():
+        return 0.0
+
+    preprocessed1 = preprocess_text(text1)
+    preprocessed2 = preprocess_text(text2)
+
+    if not preprocessed1 or not preprocessed2:
+        return 0.0
+
+    vectorizer, matrix = build_tfidf_matrix([preprocessed1, preprocessed2])
+    if vectorizer is None or matrix.shape[0] < 2:
+        return 0.0
+
+    similarity = cosine_similarity(matrix[0:1], matrix[1:2])[0][0]
+    return float(similarity)
+
+
+def extract_topics_lda(texts: list[str], num_topics: int = 3, passes: int = 10) -> dict:
+    """
+    Extract topics from a corpus using Latent Dirichlet Allocation (LDA).
+    Returns a dict with:
+      - 'topics': list of topic descriptions
+      - 'doc_topics': list of (doc_id, topic_distribution) tuples
+    If corpus is too small, returns empty dict.
+    """
+    if not texts or len(texts) < 2:
+        return {}
+
+    preprocessed = [preprocess_text(t) for t in texts]
+    preprocessed = [t for t in preprocessed if t.strip()]
+
+    if len(preprocessed) < 2:
+        return {}
+
+    num_topics = min(num_topics, len(preprocessed))
+
+    try:
+        # Use CountVectorizer for LDA (LDA works better with term frequencies)
+        vectorizer = CountVectorizer(
+            max_features=1000,
+            min_df=1,
+            max_df=0.95,
+            token_pattern=r"(?u)\S+",
+        )
+        term_matrix = vectorizer.fit_transform(preprocessed)
+
+        if term_matrix.shape[0] < 2:
+            return {}
+
+        lda = LatentDirichletAllocation(
+            n_components=num_topics,
+            random_state=42,
+            max_iter=passes,
+            learning_method="online",
+            n_jobs=-1,
+        )
+        lda.fit(term_matrix)
+
+        feature_names = vectorizer.get_feature_names_out()
+        topics = []
+        for topic_idx in range(num_topics):
+            top_indices = lda.components_[topic_idx].argsort()[-5:][::-1]
+            top_words = [feature_names[i] for i in top_indices]
+            topic_str = "、".join(top_words)
+            topics.append(f"主题 {topic_idx+1}: {topic_str}")
+
+        doc_topic_dist = lda.transform(term_matrix)
+        doc_topics = [(i, dist) for i, dist in enumerate(doc_topic_dist)]
+
+        return {
+            "topics": topics,
+            "doc_topics": doc_topics,
+        }
+    except Exception:
+        return {}
